@@ -1,0 +1,44 @@
+name: vigia
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: vigia
+jobs:
+  checar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the VPS from outside and alert on state change
+        env:
+          ALVO: ${{ secrets.VPS_ALVO }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+        run: |
+          # 3 tries over ~2 min: one lost packet does not raise an alarm
+          estado=fora
+          for i in 1 2 3; do
+            if timeout 10 bash -c "</dev/tcp/${ALVO}/22" 2>/dev/null; then estado=no_ar; break; fi
+            sleep 45
+          done
+          antes=$(cat estado.txt 2>/dev/null || echo no_ar)
+          echo "antes=$antes agora=$estado"
+          avisa() { curl -s -m 20 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+                      --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=$1" > /dev/null; }
+          if [ "$estado" != "$antes" ]; then
+            if [ "$estado" = fora ]; then
+              avisa "🔴 VPS FORA DO AR (ninguém responde há ~2 min, checado pelo GitHub). Veja o painel da Hostinger; se estiver parada, ligue."
+            else
+              avisa "🟢 VPS voltou. Confira se os bots subiram (mensagens de 'no ar')."
+            fi
+            echo "$estado" > estado.txt
+          fi
+          # GitHub disables scheduled workflows after 60 days without commits: one commit per month
+          mes=$(date -u +%Y-%m)
+          if [ "$(cat ultimo_mes.txt 2>/dev/null)" != "$mes" ]; then echo "$mes" > ultimo_mes.txt; fi
+          git config user.name vigia; git config user.email vigia@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet || { git commit -qm "estado: $estado"; git push -q; }
