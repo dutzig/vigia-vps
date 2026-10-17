@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
+    inputs:
+      teste:
+        description: Only send a test message to Telegram
+        type: boolean
+        default: false
 permissions:
   contents: write
 concurrency: vigia
@@ -26,8 +31,12 @@ jobs:
           done
           antes=$(cat estado.txt 2>/dev/null || echo no_ar)
           echo "antes=$antes agora=$estado"
-          avisa() { curl -s -m 20 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+          avisa() { curl -sf -m 20 "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
                       --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=$1" > /dev/null; }
+          if [ "${{ inputs.teste }}" = "true" ]; then
+            avisa "✅ Teste do vigia da VPS (GitHub). VPS agora: $estado. Se você recebeu isto, os avisos de queda vão chegar."
+            exit 0
+          fi
           if [ "$estado" != "$antes" ]; then
             if [ "$estado" = fora ]; then
               avisa "🔴 VPS FORA DO AR (ninguém responde há ~2 min, checado pelo GitHub). Veja o painel da Hostinger; se estiver parada, ligue."
